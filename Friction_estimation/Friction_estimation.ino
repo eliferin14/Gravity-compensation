@@ -1,5 +1,17 @@
+/*
+  This program is used to estimate the static friction of the motor
+
+  There are two possibilities:
+  - manual mode: use a potentiometer to set the pwm signal and check when the motor starts spinning
+  - automatic mode: sweep an array of pwm values and measure speed (with arduino) and current (with a multimeter)
+*/
+
 #include "AS5600.h"
 #include "Wire.h"
+
+// Only one should be active at once
+//#define MANUAL_MODE
+#define AUTO_MODE
 
 // Arduino UNO: SCL:A5 SDA:A4
 AS5600 encoder;
@@ -17,21 +29,33 @@ const int PWM_PIN = INA;
 #define BUTTON 4
 
 uint32_t Ts = 10000;
-uint32_t startT = 0;
+uint32_t t_start = 0;
 
+// Overload of map() that accept float as input
 long map(float x, float in_min, float in_max, long out_min, long out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+// Take a float dutycycle in [-1,1], and "write" the correct configuration of the l298n driver
+// NB: Saturation sould be detected before calling this function!!!
 int setPWM(float dutycycle) {
+  // Throw an error if saturation is detected. The saturation must be done outside!
+  if (abs(dutycycle) > 1) {
+    Serial.println("Saturation detected!");
+    setPWM(0);
+    exit(0);
+  }
+
+  // Set the correct direction
   if ( dutycycle >= 0 ) {
     digitalWrite(INB, 0);
   }
   else {
     digitalWrite(INB, 1);
-    dutycycle = 1+dutycycle;
+    dutycycle = 1+dutycycle;  // We are in forward brake!
   }
 
+  // Compute the int value of the pwm in the range [0,255]
   int pwm = map(dutycycle, 0, 1, 0, 255);
   analogWrite(PWM_PIN, pwm);
 
@@ -63,47 +87,44 @@ void setup() {
   //encoder.setDirection(AS5600_CLOCK_WISE);
   Serial.print("AS5600 connect: "); Serial.println(encoder.isConnected());
 
-  // Build the input vector
-  // buildInput();
-
   // Wait for the button to be pressed
   Serial.println("Press the button to start the experiment");
   while(!digitalRead(BUTTON)); delay(1000);
   Serial.println("Starting the experiment");
 
-  while(true) {
-    int potValue = analogRead(POT);
-    float dc = potValue / 1023.0;
-    setPWM(dc);
-    Serial.print(dc); Serial.print("\t"); Serial.println(encoder.getAngularSpeed(AS5600_MODE_RADIANS));
-    delay(Ts/1000);
-  }
+  #ifdef MANUAL_MODE
+    while(true) {
+      // Read the potentiometer and set the correct dutycycle
+      int potValue = analogRead(POT);
+      float dc = potValue / 1023.0;
+      setPWM(dc);
 
-  float pwm_friction = 0.3;
-  while(true) {
-    setPWM(pwm_friction);
-    delay(Ts/1000);
-    Serial.println(encoder.getAngularSpeed(AS5600_MODE_RADIANS));
-    setPWM(pwm_friction);
-    delay(Ts/1000);
-    Serial.println(encoder.getAngularSpeed(AS5600_MODE_RADIANS));
-  }
+      Serial.print(dc); Serial.print("\t"); Serial.println(encoder.getAngularSpeed(AS5600_MODE_RADIANS));
 
-  for (float dutycycle = -0.5; dutycycle < 0.5; dutycycle+=0.02) {
-    setPWM(dutycycle);
-    delay(1000);
-    Serial.print(dutycycle); Serial.print(", ");
-
-    int N = 100;
-    float speed = 0;
-    encoder.getAngularSpeed();
-
-    while(!digitalRead(BUTTON)) {
-      speed += 0.99 * ( encoder.getAngularSpeed(AS5600_MODE_RADIANS) - speed );
       delay(Ts/1000);
     }
-    Serial.print(speed); Serial.print("; ");
-  }
+  #endif
+
+  #ifdef AUTO_MODE
+    // Sweep a set of dutycycle values
+    // For each value, measure speed and current
+    for (float dutycycle = -0.5; dutycycle < 0.5; dutycycle+=0.02) {
+      setPWM(dutycycle);
+      delay(1000);  // Skip the transient
+      Serial.print(dutycycle); Serial.print(", ");
+
+      // Initialize speed
+      float speed = 0;
+      encoder.getAngularSpeed();
+
+      // Wait for the motor to be at a stable speed. When it is, press the button to print the data and go to the next value
+      while(!digitalRead(BUTTON)) {
+        speed += 0.99 * ( encoder.getAngularSpeed(AS5600_MODE_RADIANS) - speed ); // Mean with forgetting factor
+        delay(Ts/1000);
+      }
+      Serial.print(speed); Serial.print("; ");
+    }
+  #endif
 
 }
 
