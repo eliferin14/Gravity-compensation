@@ -1,3 +1,10 @@
+/*
+  This program is used to identify the initial angle reading of the encoder
+  Set the bar to downward position
+  Start the program
+  Memorize the offset and use it in the control program
+*/
+
 #include "AS5600.h"
 #include "Wire.h"
 

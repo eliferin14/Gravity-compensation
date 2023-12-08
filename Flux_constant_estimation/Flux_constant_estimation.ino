@@ -55,7 +55,7 @@ void loop() {
     if (n==1) {
       speed_avg = speed;
     }
-    speed_avg += 1.0/n * (speed - speed_avg);
+    speed_avg += 0.99 * (speed - speed_avg);
 
     // Print to monitor
     Serial.print(speed); Serial.print("\t"); Serial.println(speed_avg);
