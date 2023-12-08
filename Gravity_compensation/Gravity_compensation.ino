@@ -18,7 +18,7 @@ uint32_t Ts = 5000;
 
 // Encoder offset: the raw position when the bar is downward (our theta=0 position)
 // Use the "offset.ino" program to get this value
-float offset = 150;
+float offset = 153;
 
 // Power parameters
 #define V_PSU 11.7 // Before the driver [V]
@@ -32,7 +32,7 @@ const float V_MOT_MAX = V_PSU - DRIVER_DROP;
 #define J_rot 0.000022  // [kg m^2]
 
 // Gravity compensation parameters
-#define m 0.01     // mass [kg]
+#define m 0.003     // mass [kg]
 #define l 0.23    // length [m]
 #define g 9.81     // gravity acceleration [m/s^2]
 float linear_density = m / l;   // [kg/m]
@@ -54,9 +54,9 @@ float theta_ref = 0;
 int pwm = 0;
 
 // PID gains
-float kp = 0;
-float ki = 0;
-float kd = 0;
+float kp = 0.5;
+float ki = 0.5;
+float kd = 0.0;
 
 // Overload of map() that accept float as input
 long map(float x, float in_min, float in_max, long out_min, long out_max) {
@@ -138,6 +138,12 @@ void loop() {
   // Read the position of the bar
   float theta = readTheta();
 
+  // If the button is pressed, refresh the reference to be the current position
+  if (digitalRead(BUTTON)) {
+    theta_ref = theta;
+    error_integral = 0;
+  }
+
   // PID controller
 
     // Save the previous value of the error
@@ -145,6 +151,12 @@ void loop() {
 
     // Compute the new error
     error = theta_ref - theta;
+    if (error > PI) {
+      error -= 2*PI;
+    }
+    else if (error < -PI) {
+      error += 2*PI;
+    }
 
     // If not saturating, increment the integral
     if (pwm < 255) error_integral += error * Ts/1000000.0;
@@ -169,7 +181,7 @@ void loop() {
   pwm = setPWM(dutycycle);
 
   // Print the data
-  Serial.print( theta, 3 ); Serial.print(" "); Serial.print( error, 3 ); Serial.print(" ");Serial.print(dutycycle, 3); Serial.print(" "); Serial.print(pwm); Serial.println();
+  Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print(pwm); Serial.println();
 
   if ( micros()-start_time > Ts ) {
     Serial.println("Sampling time too short");
