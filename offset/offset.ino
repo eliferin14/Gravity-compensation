@@ -22,7 +22,7 @@ void setup() {
   Wire.begin();
   Wire.setClock(800000);
   encoder.begin(2);
-  encoder.setDirection(AS5600_CLOCK_WISE);
+  //encoder.setDirection(AS5600_CLOCK_WISE);
   Serial.print("AS5600 connect: "); Serial.println(encoder.isConnected());
 
 }
