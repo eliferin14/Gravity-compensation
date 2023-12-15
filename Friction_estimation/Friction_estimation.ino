@@ -10,8 +10,8 @@
 #include "Wire.h"
 
 // Only one should be active at once
-//#define MANUAL_MODE
-#define AUTO_MODE
+#define MANUAL_MODE
+//#define AUTO_MODE
 
 // Arduino UNO: SCL:A5 SDA:A4
 AS5600 encoder;

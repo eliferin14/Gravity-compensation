@@ -22,7 +22,7 @@ float offset = 153;
 
 // Power parameters
 #define V_PSU 11.7 // Before the driver [V]
-#define DRIVER_DROP 1.8  // Voltage drop of the driver [V]
+#define DRIVER_DROP 1.4  // Voltage drop of the driver [V]
 const float V_MOT_MAX = V_PSU - DRIVER_DROP;
 
 // Motor parameters
@@ -54,9 +54,9 @@ float theta_ref = 0;
 int pwm = 0;
 
 // PID gains
-float kp = 0.5;
-float ki = 0.5;
-float kd = 0.0;
+float kp = 0.39;
+float ki = 0.07;
+float kd = 0.05;
 
 // Overload of map() that accept float as input
 long map(float x, float in_min, float in_max, long out_min, long out_max) {
@@ -99,6 +99,32 @@ float readTheta() {
 // Return the sign of a number
 float sign(float x) {
   return x / abs(x);
+}
+
+// Given the error, compute the friction compensation term
+// If we use a simple sign(error) * friction_dutycycle, the input oscillates too much and the br oscillates a lot, so we need to smooth it
+// Linear seems to work well
+
+//#define THRESHOLD
+#define LINEAR
+//#define HYSTERESYS
+float friction_dutycycle = 0.18; // Voltage required to overcome static friction
+float error_threshold = 0.05;  // [rad]
+float frictionCompensation(float error) {
+  float dutycycle;
+
+  #ifdef THRESHOLD
+    if (abs(error) > error_threshold) {
+      dutycycle = sign(error) * friction_dutycycle;
+    }
+  #endif
+
+  #ifdef LINEAR
+    dutycycle = error / error_threshold * friction_dutycycle;
+    if (error > error_threshold) dutycycle = friction_dutycycle;
+  #endif
+
+  return dutycycle;
 }
 
 void setup() {
@@ -171,7 +197,7 @@ void loop() {
   dutycycle += gravityCompensation(theta);
 
   // Static friction compensation
-  // TBD
+  dutycycle += frictionCompensation(error);
 
   // dutycycle saturation correction
   if (dutycycle > 1) dutycycle = 1;
