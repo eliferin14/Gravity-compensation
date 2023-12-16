@@ -32,7 +32,7 @@ const float V_MOT_MAX = V_PSU - DRIVER_DROP;
 #define J_rot 0.000022  // [kg m^2]
 
 // Gravity compensation parameters
-#define m 0.003     // mass [kg]
+#define m 0.0032     // mass [kg]
 #define l 0.23    // length [m]
 #define g 9.81     // gravity acceleration [m/s^2]
 float linear_density = m / l;   // [kg/m]
@@ -50,12 +50,12 @@ float error = 0;
 float error_integral = 0;
 float previous_error = 0;
 float error_derivative = 0;
-float theta_ref = 0;
+float theta_ref = PI/2;
 int pwm = 0;
 
 // PID gains
 float kp = 0.39;
-float ki = 0.07;
+float ki = 0.7;
 float kd = 0.05;
 
 // Overload of map() that accept float as input
@@ -110,8 +110,9 @@ float sign(float x) {
 //#define HYSTERESYS
 float friction_dutycycle = 0.18; // Voltage required to overcome static friction
 float error_threshold = 0.05;  // [rad]
+
 float frictionCompensation(float error) {
-  float dutycycle;
+  float dutycycle = 0;
 
   #ifdef THRESHOLD
     if (abs(error) > error_threshold) {
@@ -120,8 +121,12 @@ float frictionCompensation(float error) {
   #endif
 
   #ifdef LINEAR
-    dutycycle = error / error_threshold * friction_dutycycle;
-    if (error > error_threshold) dutycycle = friction_dutycycle;
+    if ( abs(error) > error_threshold) {
+      dutycycle = sign(error) * friction_dutycycle;
+    }
+    else {
+      dutycycle = error / error_threshold * friction_dutycycle;
+    }
   #endif
 
   return dutycycle;
@@ -156,6 +161,9 @@ void setup() {
   Serial.println("Press the button to start the experiment");
   while(!digitalRead(BUTTON)); delay(1000);
   Serial.println("Starting the experiment");
+
+  // Initialize error to avoid initial spike in the derivative
+  error = readTheta() - theta_ref;
 }
 
 void loop() {
@@ -184,20 +192,23 @@ void loop() {
       error += 2*PI;
     }
 
-    // If not saturating, increment the integral
+    // If not saturating, increment the integral ("anti-windup")
     if (pwm < 255) error_integral += error * Ts/1000000.0;
 
     // Compute the discrete derivative of the error
-    error_derivative = (error - previous_error) / (Ts/1000000.0);
+    float error_delta = error - previous_error;
+    if ( abs(error_delta) < PI ) error_derivative = (error_delta) / (Ts/1000000.0);
 
     // Compute the dutycycle
     float dutycycle = kp*error + ki*error_integral + kd*error_derivative;
 
   // Gravity compensation
-  dutycycle += gravityCompensation(theta);
+  float g_comp = gravityCompensation(theta);
+  dutycycle += g_comp;
 
   // Static friction compensation
-  dutycycle += frictionCompensation(error);
+  float f_comp = frictionCompensation(error);
+  dutycycle += f_comp;
 
   // dutycycle saturation correction
   if (dutycycle > 1) dutycycle = 1;
@@ -207,7 +218,7 @@ void loop() {
   pwm = setPWM(dutycycle);
 
   // Print the data
-  Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print(pwm); Serial.println();
+  Serial.print("#"); Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.println();
 
   if ( micros()-start_time > Ts ) {
     Serial.println("Sampling time too short");
