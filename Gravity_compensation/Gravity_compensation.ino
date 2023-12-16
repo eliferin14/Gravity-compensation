@@ -8,7 +8,7 @@ AS5600 encoder;
 #define INA 5
 #define INB 6
 #define EN 3
-const int PWM_PIN = INA;
+int PWM_PIN = INA;
 
 // Control button
 #define BUTTON 4
@@ -50,7 +50,7 @@ float error = 0;
 float error_integral = 0;
 float previous_error = 0;
 float error_derivative = 0;
-float theta_ref = PI/2;
+float theta_ref = -PI/2;
 float dutycycle = 0;
 int pwm = 0;
 
@@ -66,6 +66,7 @@ long map(float x, float in_min, float in_max, long out_min, long out_max) {
 
 // Take a float dutycycle in [-1,1], and "write" the correct configuration of the l298n driver
 // NB: Saturation sould be detected before calling this function!!!
+#define FORWARD_BRAKE
 int setPWM(float dutycycle) {
   // Throw an error if saturation is detected. The saturation must be done outside!
   if (abs(dutycycle) > 1) {
@@ -74,17 +75,33 @@ int setPWM(float dutycycle) {
     exit(0);
   }
 
-  // Set the correct direction
-  if ( dutycycle >= 0 ) {
-    digitalWrite(INB, 0);
-  }
-  else {
-    digitalWrite(INB, 1);
-    dutycycle = 1+dutycycle;  // We are in forward brake!
-  }
+  #ifdef FORWARD_BRAKE
+    digitalWrite(EN, 1);
+    // Set the correct direction
+    if ( dutycycle >= 0 ) {
+      PWM_PIN = INA;
+      digitalWrite(INB, 0);
+    }
+    else {
+      PWM_PIN = INB;
+      digitalWrite(INA, 0);
+    }
+  #endif
+
+  #ifndef FORWARD_BRAKE
+    PWM_PIN = EN;
+    if (dutycycle >= 0) {
+      digitalWrite(INA, 1);
+      digitalWrite(INB, 0);
+    }
+    else {
+      digitalWrite(INA, 0);
+      digitalWrite(INB, 1);
+    }
+  #endif
 
   // Compute the int value of the pwm in the range [0,255]
-  int pwm = map(dutycycle, 0, 1, 0, 255);
+  int pwm = map( abs(dutycycle) , 0, 1, 0, 255);
   analogWrite(PWM_PIN, pwm);
 
   return pwm;
