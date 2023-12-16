@@ -51,6 +51,7 @@ float error_integral = 0;
 float previous_error = 0;
 float error_derivative = 0;
 float theta_ref = PI/2;
+float dutycycle = 0;
 int pwm = 0;
 
 // PID gains
@@ -193,14 +194,14 @@ void loop() {
     }
 
     // If not saturating, increment the integral ("anti-windup")
-    if (pwm < 255) error_integral += error * Ts/1000000.0;
+    if (abs(dutycycle) <= 0.99) error_integral += error * Ts/1000000.0;
 
     // Compute the discrete derivative of the error
     float error_delta = error - previous_error;
     if ( abs(error_delta) < PI ) error_derivative = (error_delta) / (Ts/1000000.0);
 
     // Compute the dutycycle
-    float dutycycle = kp*error + ki*error_integral + kd*error_derivative;
+    dutycycle = kp*error + ki*error_integral + kd*error_derivative;
 
   // Gravity compensation
   float g_comp = gravityCompensation(theta);
@@ -218,7 +219,7 @@ void loop() {
   pwm = setPWM(dutycycle);
 
   // Print the data
-  Serial.print("#"); Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.println();
+  Serial.print("#"); Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( pwm ); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.println();
 
   if ( micros()-start_time > Ts ) {
     Serial.println("Sampling time too short");
