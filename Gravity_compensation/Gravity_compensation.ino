@@ -67,6 +67,7 @@ long map(float x, float in_min, float in_max, long out_min, long out_max) {
 // Take a float dutycycle in [-1,1], and "write" the correct configuration of the l298n driver
 // NB: Saturation sould be detected before calling this function!!!
 #define FORWARD_BRAKE
+//#define FB_SWITCH_PINS
 int setPWM(float dutycycle) {
   // Throw an error if saturation is detected. The saturation must be done outside!
   if (abs(dutycycle) > 1) {
@@ -76,16 +77,32 @@ int setPWM(float dutycycle) {
   }
 
   #ifdef FORWARD_BRAKE
-    digitalWrite(EN, 1);
-    // Set the correct direction
-    if ( dutycycle >= 0 ) {
-      PWM_PIN = INA;
-      digitalWrite(INB, 0);
-    }
-    else {
-      PWM_PIN = INB;
-      digitalWrite(INA, 0);
-    }
+
+    #ifdef FB_SWITCH_PINS
+      digitalWrite(EN, 1);
+      // Set the correct direction
+      if ( dutycycle >= 0 ) {
+        PWM_PIN = INA;
+        digitalWrite(INB, 0);
+      }
+      else {
+        PWM_PIN = INB;
+        digitalWrite(INA, 0);
+      }
+    #endif
+
+    #ifndef FB_SWITCH_PINS
+      digitalWrite(EN, 1);
+      // Set the correct direction
+      if ( dutycycle >= 0 ) {
+        digitalWrite(INB, 0);
+      }
+      else {
+        digitalWrite(INB, 1);
+        dutycycle = 1+dutycycle;  // We are in forward brake!
+      }
+    #endif
+
   #endif
 
   #ifndef FORWARD_BRAKE
