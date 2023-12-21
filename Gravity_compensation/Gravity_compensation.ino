@@ -22,7 +22,7 @@ float offset = 153;
 
 // Power parameters
 #define V_PSU 11.7 // Before the driver [V]
-#define DRIVER_DROP 1.4  // Voltage drop of the driver [V]
+#define DRIVER_DROP 1.8  // Voltage drop of the driver [V]
 const float V_MOT_MAX = V_PSU - DRIVER_DROP;
 
 // Motor parameters
@@ -50,12 +50,12 @@ float error = 0;
 float error_integral = 0;
 float previous_error = 0;
 float error_derivative = 0;
-float theta_ref = -PI/2;
+float theta_ref = -3*PI/4;
 float dutycycle = 0;
 int pwm = 0;
 
 // PID gains
-float kp = 0.39;
+float kp = 0.25;
 float ki = 0.7;
 float kd = 0.05;
 
@@ -118,7 +118,7 @@ int setPWM(float dutycycle) {
   #endif
 
   // Compute the int value of the pwm in the range [0,255]
-  int pwm = map( abs(dutycycle) , 0, 1, 0, 255);
+  int pwm = map( abs(dutycycle), 0.0, 1.0, 0, 255);
   analogWrite(PWM_PIN, pwm);
 
   return pwm;
@@ -179,7 +179,7 @@ void setup() {
   pinMode(BUTTON, INPUT);
 
   // Increase the baudrate to speed things up
-  Serial.begin(115200);
+  Serial.begin(250000);
   Serial.println("\n===================================\nProgram started");
 
   // From the library example 
@@ -228,7 +228,7 @@ void loop() {
     }
 
     // If not saturating, increment the integral ("anti-windup")
-    if (abs(dutycycle) <= 0.99) error_integral += error * Ts/1000000.0;
+    if (abs(dutycycle) <= 0.99) error_integral += error * (Ts/1000000.0);
 
     // Compute the discrete derivative of the error
     float error_delta = error - previous_error;
@@ -253,10 +253,18 @@ void loop() {
   pwm = setPWM(dutycycle);
 
   // Print the data
-  Serial.print("#"); Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( pwm ); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.println();
+  Serial.print("#"); Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( pwm ); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); Serial.println();
+
+  // Speed limit
+  if ( abs(error_derivative) > 50 ) {
+    setPWM(0);
+    //delay(100);
+    Serial.println("Too fast!");
+  }
 
   if ( micros()-start_time > Ts ) {
     Serial.println("Sampling time too short");
+    delay(100);
     exit(0);
   }
   while( micros()-start_time < Ts );  
