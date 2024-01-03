@@ -1,8 +1,11 @@
 #include "AS5600.h"
+#include "INA219.h"
 #include "Wire.h"
 
+// i2c sensors
 // Arduino UNO: SCL:A5 SDA:A4
-AS5600 encoder;
+AS5600 encoder;   // AS5600 encoder
+INA219 ina(0x40); // INA219 current and voltage sensor
 
 // L298N
 #define INA 5
@@ -50,7 +53,7 @@ float error = 0;
 float error_integral = 0;
 float previous_error = 0;
 float error_derivative = 0;
-float theta_ref = -3*PI/4;
+float theta_ref = 0;
 float dutycycle = 0;
 int pwm = 0;
 
@@ -67,7 +70,7 @@ long map(float x, float in_min, float in_max, long out_min, long out_max) {
 // Take a float dutycycle in [-1,1], and "write" the correct configuration of the l298n driver
 // NB: Saturation sould be detected before calling this function!!!
 #define FORWARD_BRAKE
-//#define FB_SWITCH_PINS
+#define FB_SWITCH_PINS
 int setPWM(float dutycycle) {
   // Throw an error if saturation is detected. The saturation must be done outside!
   if (abs(dutycycle) > 1) {
@@ -167,6 +170,49 @@ float frictionCompensation(float error) {
   return dutycycle;
 }
 
+// Current filtering
+//#define AVERAGE_FORGETTING
+#define LOWPASS
+
+#ifdef AVERAGE_FORGETTING
+  float forgettingFactor = 0.999;
+  float averageCurrent = 0 ;
+#endif
+
+#ifdef LOWPASS
+  float filterT = 0.2;
+  float oldCurrent = 0;
+  uint32_t oldTimestamp = 0;
+#endif
+
+float currentFilter(float measurement) {
+  float filteredCurrent = 0;
+
+  #ifdef AVERAGE_FORGETTING
+    averageCurrent += forgettingFactor * (measurement - averageCurrent);
+    filteredCurrent = averageCurrent;
+  #endif
+
+  #ifdef LOWPASS
+    unsigned long timestamp = micros();
+    float dt = (timestamp - oldTimestamp)*1e-6f;
+    // quick fix for strange cases (micros overflow)
+    if (dt < 0.0f || dt > 0.5f) dt = 1e-3f;
+
+    // calculate the filtering 
+    float alpha = filterT/(filterT + dt);
+    filteredCurrent = alpha * oldCurrent + (1.0f - alpha)*measurement;
+
+    // save the variables
+    oldCurrent = filteredCurrent;
+    oldTimestamp = timestamp;
+  #endif
+
+  return filteredCurrent;
+}
+
+
+// ====================================== ACTUAL PROGRAM ====================================
 void setup() {
   pinMode(INA, OUTPUT);
   pinMode(INB, OUTPUT);
@@ -182,12 +228,16 @@ void setup() {
   Serial.begin(250000);
   Serial.println("\n===================================\nProgram started");
 
-  // From the library example 
+  // Initialize the i2c sensors
   Wire.begin();
   Wire.setClock(800000);
+
   encoder.begin(2);
-  //encoder.setDirection(AS5600_CLOCK_WISE);
   Serial.print("AS5600 connect: "); Serial.println(encoder.isConnected());
+
+  ina.begin();
+  ina.setMaxCurrentShunt(3.2, 0.1);
+  Serial.print("INA219 connect: "); Serial.println(ina.isConnected());
 
   // Set the offset
   encoder.setOffset(-offset);
@@ -203,6 +253,10 @@ void setup() {
 
 void loop() {
   uint32_t start_time = micros();
+
+  // Read the current draw and filter
+  float current = ina.getCurrent();
+  float filteredCurrent = currentFilter(current);
 
   // Read the position of the bar
   float theta = readTheta();
@@ -253,19 +307,24 @@ void loop() {
   pwm = setPWM(dutycycle);
 
   // Print the data
-  Serial.print("#"); Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( pwm ); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); Serial.println();
+  //Serial.print("#"); Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 );   Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); 
+  Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); Serial.print("\t"); 
+  Serial.print( current, 3 ); Serial.print("\t"); Serial.print( filteredCurrent, 3 ); 
+  Serial.println();
 
   // Speed limit
-  if ( abs(error_derivative) > 50 ) {
+  /*
+  if ( abs(error_derivative) > 100 ) {
     setPWM(0);
-    //delay(100);
     Serial.println("Too fast!");
-  }
+    delay(100);
+    exit(0);
+  }*/
 
   if ( micros()-start_time > Ts ) {
     Serial.println("Sampling time too short");
-    delay(100);
-    exit(0);
+    //delay(100);
+    //exit(0);
   }
   while( micros()-start_time < Ts );  
 }
