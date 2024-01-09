@@ -1,11 +1,13 @@
 #include "AS5600.h"
-#include "INA219.h"
 #include "Wire.h"
+#include "math.h"
 
-// i2c sensors
-// Arduino UNO: SCL:A5 SDA:A4
-AS5600 encoder;   // AS5600 encoder
-INA219 ina(0x40); // INA219 current and voltage sensor
+// Arduino UNO i2c pins: SCL:A5 SDA:A4
+// Remeber to connect the DIR pin of the encoder to 5V to set the direction to counter-clockwise
+// If using the gearbox, the motor spins in the opposite direction wrt the load => connect DIR to GND
+AS5600 encoder;
+float motor_position, motor_position_cumulative;
+float theta, theta_cumulative;
 
 // L298N
 #define INA 5
@@ -20,10 +22,11 @@ int PWM_PIN = INA;
 uint32_t Ts = 5000;  
 
 // Encoder offset: the raw position when the bar is downward (our theta=0 position)
-// Use the "offset.ino" program to get this value
-float offset = 153;
+// Use the "offset.ino" program to get this value in degrees
+float offset_degrees = 143.53;
+float offset_radians = offset_degrees * 2*PI / 360;
 
-// Power parameters
+// Power supply parameters
 #define V_PSU 11.7 // Before the driver [V]
 #define DRIVER_DROP 1.8  // Voltage drop of the driver [V]
 const float V_MOT_MAX = V_PSU - DRIVER_DROP;
@@ -33,6 +36,10 @@ const float V_MOT_MAX = V_PSU - DRIVER_DROP;
 #define L 0.0045  // [H]
 #define kphi 0.0033 // [Vs]
 #define J_rot 0.000022  // [kg m^2]
+
+// Gearbox parameters
+#define GEARBOX_RATIO 5.0 // The load spins 5 times slower than the motors
+#define GEARBOX_EFFICIENCY 1.0
 
 // Gravity compensation parameters
 #define m 0.0032     // mass [kg]
@@ -53,7 +60,7 @@ float error = 0;
 float error_integral = 0;
 float previous_error = 0;
 float error_derivative = 0;
-float theta_ref = 0;
+float theta_ref = PI/2;
 float dutycycle = 0;
 int pwm = 0;
 
@@ -70,7 +77,7 @@ long map(float x, float in_min, float in_max, long out_min, long out_max) {
 // Take a float dutycycle in [-1,1], and "write" the correct configuration of the l298n driver
 // NB: Saturation sould be detected before calling this function!!!
 #define FORWARD_BRAKE
-#define FB_SWITCH_PINS
+//#define FB_SWITCH_PINS
 int setPWM(float dutycycle) {
   // Throw an error if saturation is detected. The saturation must be done outside!
   if (abs(dutycycle) > 1) {
@@ -128,9 +135,21 @@ int setPWM(float dutycycle) {
 }
 
 // Return the angle in radians in a range [-pi,pi], where 0 is the downward position
+// We are measuring the motor's position, but we want to control the load => we need to take into account the gearbox
 float readTheta() {
-  float theta = encoder.readAngle() * AS5600_RAW_TO_RADIANS; // [0, 2*pi]
-  if (theta > PI) theta = theta - 2*PI;                      // [-pi, pi]
+  // Measure the cumulative position of the motor, taking into account the offset
+  motor_position_cumulative = (encoder.getCumulativePosition() * AS5600_RAW_TO_RADIANS) + offset_radians;
+
+  // Cumulative position of the load
+  theta_cumulative = motor_position_cumulative / GEARBOX_RATIO; 
+
+  // Remove complete revolutions from the measurement
+  float theta = fmod(theta_cumulative, 2*PI); // in [-2*PI, 2*PI]
+
+  // We want the measurement to be in the [-PI, PI] range
+  if (theta > PI) theta -= 2*PI;  
+  else if (theta < -PI) theta += 2*PI;
+
   return theta;
 }
 
@@ -170,49 +189,6 @@ float frictionCompensation(float error) {
   return dutycycle;
 }
 
-// Current filtering
-//#define AVERAGE_FORGETTING
-#define LOWPASS
-
-#ifdef AVERAGE_FORGETTING
-  float forgettingFactor = 0.999;
-  float averageCurrent = 0 ;
-#endif
-
-#ifdef LOWPASS
-  float filterT = 0.2;
-  float oldCurrent = 0;
-  uint32_t oldTimestamp = 0;
-#endif
-
-float currentFilter(float measurement) {
-  float filteredCurrent = 0;
-
-  #ifdef AVERAGE_FORGETTING
-    averageCurrent += forgettingFactor * (measurement - averageCurrent);
-    filteredCurrent = averageCurrent;
-  #endif
-
-  #ifdef LOWPASS
-    unsigned long timestamp = micros();
-    float dt = (timestamp - oldTimestamp)*1e-6f;
-    // quick fix for strange cases (micros overflow)
-    if (dt < 0.0f || dt > 0.5f) dt = 1e-3f;
-
-    // calculate the filtering 
-    float alpha = filterT/(filterT + dt);
-    filteredCurrent = alpha * oldCurrent + (1.0f - alpha)*measurement;
-
-    // save the variables
-    oldCurrent = filteredCurrent;
-    oldTimestamp = timestamp;
-  #endif
-
-  return filteredCurrent;
-}
-
-
-// ====================================== ACTUAL PROGRAM ====================================
 void setup() {
   pinMode(INA, OUTPUT);
   pinMode(INB, OUTPUT);
@@ -228,19 +204,15 @@ void setup() {
   Serial.begin(250000);
   Serial.println("\n===================================\nProgram started");
 
-  // Initialize the i2c sensors
+  // From the library example 
   Wire.begin();
   Wire.setClock(800000);
-
   encoder.begin(2);
   Serial.print("AS5600 connect: "); Serial.println(encoder.isConnected());
 
-  ina.begin();
-  ina.setMaxCurrentShunt(3.2, 0.1);
-  Serial.print("INA219 connect: "); Serial.println(ina.isConnected());
-
   // Set the offset
-  encoder.setOffset(-offset);
+  encoder.setOffset(-offset_degrees);
+  //encoder.resetPosition();
 
   // Wait for the button to be pressed
   Serial.println("Press the button to start the experiment");
@@ -254,12 +226,8 @@ void setup() {
 void loop() {
   uint32_t start_time = micros();
 
-  // Read the current draw and filter
-  float current = ina.getCurrent();
-  float filteredCurrent = currentFilter(current);
-
   // Read the position of the bar
-  float theta = readTheta();
+  theta = readTheta();
 
   // If the button is pressed, refresh the reference to be the current position
   if (digitalRead(BUTTON)) {
@@ -307,24 +275,22 @@ void loop() {
   pwm = setPWM(dutycycle);
 
   // Print the data
-  //Serial.print("#"); Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 );   Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); 
-  Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); Serial.print("\t"); 
-  Serial.print( current, 3 ); Serial.print("\t"); Serial.print( filteredCurrent, 3 ); 
+  Serial.print("#"); 
+  Serial.print(motor_position_cumulative); Serial.print("\t"); Serial.print(motor_position); Serial.print("\t"); Serial.print(theta_cumulative); Serial.print("\t"); 
+  Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); //Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( pwm ); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); 
   Serial.println();
 
   // Speed limit
-  /*
-  if ( abs(error_derivative) > 100 ) {
+  if ( abs(error_derivative) > 50 ) {
     setPWM(0);
+    //delay(100);
     Serial.println("Too fast!");
-    delay(100);
-    exit(0);
-  }*/
+  }
 
   if ( micros()-start_time > Ts ) {
     Serial.println("Sampling time too short");
-    //delay(100);
-    //exit(0);
+    delay(100);
+    exit(0);
   }
   while( micros()-start_time < Ts );  
 }
