@@ -48,10 +48,11 @@ const float V_MOT_MAX = V_PSU - DRIVER_DROP;
 float linear_density = m / l;   // [kg/m]
 float d_gc = (l - 0.04) / 2 + 0.02; // distance of the center of mass of the part of the bar that produces torque [m]
 float m_gc = linear_density * (l - 0.04); // mass " [kg]
+float gcomp_magic_number = 0.0047;
 
 // Given the angle compute the dutycycle that compensate the gravity torque
 float gravityCompensation(float theta) {
-  float V_gc = sin(theta) * m_gc*d_gc*g * R/kphi; // Voltage [V]
+  float V_gc = sin(theta) * gcomp_magic_number * R/kphi; // Voltage [V]
   return V_gc / V_MOT_MAX;                        // dutycycle in range [0,1]
 }
 
@@ -60,14 +61,20 @@ float error = 0;
 float error_integral = 0;
 float previous_error = 0;
 float error_derivative = 0;
-float theta_ref = PI/2;
+float theta_ref = PI*3/4;
 float dutycycle = 0;
 int pwm = 0;
 
 // PID gains
-float kp = 0.25;
-float ki = 0.7;
-float kd = 0.05;
+// Ku = 5.5 Pu = 0.215
+float ku = 5.5;
+float Pu = 0.215;
+float tau_i = Pu / 2;
+float tau_d = Pu / 8;
+
+float kp = 0.6 * ku;
+float ki = ku / tau_i;
+float kd = ku * tau_d;
 
 // Overload of map() that accept float as input
 long map(float x, float in_min, float in_max, long out_min, long out_max) {
@@ -138,7 +145,7 @@ int setPWM(float dutycycle) {
 // We are measuring the motor's position, but we want to control the load => we need to take into account the gearbox
 float readTheta() {
   // Measure the cumulative position of the motor, taking into account the offset
-  motor_position_cumulative = (encoder.getCumulativePosition() * AS5600_RAW_TO_RADIANS) + offset_radians;
+  motor_position_cumulative = (encoder.getCumulativePosition() * AS5600_RAW_TO_RADIANS);
 
   // Cumulative position of the load
   theta_cumulative = motor_position_cumulative / GEARBOX_RATIO; 
@@ -212,7 +219,7 @@ void setup() {
 
   // Set the offset
   encoder.setOffset(-offset_degrees);
-  //encoder.resetPosition();
+  encoder.resetCumulativePosition();
 
   // Wait for the button to be pressed
   Serial.println("Press the button to start the experiment");
@@ -271,13 +278,15 @@ void loop() {
   if (dutycycle > 1) dutycycle = 1;
   if (dutycycle < -1) dutycycle = -1;
 
+  dutycycle *= -1;
+
   // Set the pwm
   pwm = setPWM(dutycycle);
 
   // Print the data
   Serial.print("#"); 
-  Serial.print(motor_position_cumulative); Serial.print("\t"); Serial.print(motor_position); Serial.print("\t"); Serial.print(theta_cumulative); Serial.print("\t"); 
-  Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); //Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( pwm ); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); 
+  //Serial.print(motor_position_cumulative); Serial.print("\t"); Serial.print(motor_position); Serial.print("\t"); Serial.print(theta_cumulative); Serial.print("\t"); 
+  Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( error, 3 ); Serial.print("\t"); Serial.print( error_integral, 3 ); Serial.print("\t"); Serial.print( error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print( pwm ); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); 
   Serial.println();
 
   // Speed limit
