@@ -18,6 +18,9 @@ int PWM_PIN = INA;
 // Control button
 #define BUTTON 4
 
+// Potentiometer
+#define POT A1
+
 // Sampling time [us]
 uint32_t Ts = 5000;  
 
@@ -52,7 +55,7 @@ float gcomp_magic_number = 0.0047;
 
 // Given the angle compute the dutycycle that compensate the gravity torque
 float gravityCompensation(float theta) {
-  float x = sin(theta); //+ 0.2*cos(2*theta);
+  float x = sin(theta) + 0.2*cos(2*theta);
   float V_gc = x * gcomp_magic_number * R/kphi; // Voltage [V]
   return V_gc / V_MOT_MAX;                        // dutycycle in range [0,1]
 }
@@ -208,6 +211,7 @@ void setup() {
   pinMode(INA, OUTPUT);
   pinMode(INB, OUTPUT);
   pinMode(EN, OUTPUT);
+  pinMode(POT, INPUT);
 
   // Change this depending on the configuration
   digitalWrite(INB, 0);
@@ -250,68 +254,13 @@ void loop() {
     error_integral = 0;
   }
 
-  // PID controller
+      // Read the potentiometer and set the correct dutycycle
+      int potValue = analogRead(POT);
+      float dc = potValue / 1023.0;
+      setPWM(-1*dc);
 
-    // Save the previous value of the error
-    previous_error = error;
+      Serial.print(dc); Serial.print("\t"); Serial.println(theta);
 
-    // Compute the new error
-    error = theta_ref - theta;
-    if (error > PI) {
-      error -= 2*PI;
-    }
-    else if (error < -PI) {
-      error += 2*PI;
-    }
-
-    // If not saturating, increment the integral ("anti-windup")
-    if (abs(dutycycle) <= 0.99) error_integral += error * (Ts/1000000.0);
-
-    // Compute the discrete derivative of the error
-    float error_delta = error - previous_error;
-    if ( abs(error_delta) < PI ) error_derivative = (error_delta) / (Ts/1000000.0);
-    // Low pass filter applied to derivative
-    error_derivative = lowPass(error_derivative, error_derivative_previous, 0.85);
-    error_derivative_previous = error_derivative;
-
-    // Compute the dutycycle
-    dutycycle = kp*error + ki*error_integral + kd*error_derivative;
-
-  // Gravity compensation
-  float g_comp = gravityCompensation(theta);
-  dutycycle += g_comp;
-
-  // Static friction compensation
-  float f_comp = frictionCompensation(error);
-  dutycycle += f_comp;
-
-  // dutycycle saturation correction
-  if (dutycycle > 1) dutycycle = 1;
-  if (dutycycle < -1) dutycycle = -1;
-
-  // Change direction because we have the gearbox
-  dutycycle *= -1;
-
-  // Set the pwm
-  pwm = setPWM(dutycycle);
-
-  // Print the data
-  Serial.print("#"); 
-  //Serial.print(motor_position_cumulative); Serial.print("\t"); Serial.print(motor_position); Serial.print("\t"); Serial.print(theta_cumulative); Serial.print("\t"); 
-  Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); Serial.print("\t"); Serial.print(kp* error, 3 ); Serial.print("\t"); Serial.print( ki* error_integral, 3 ); Serial.print("\t"); Serial.print(kd* error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 );  
-  Serial.println();
-
-  // Speed limit
-  if ( abs(error_derivative) > 50 ) {
-    setPWM(0);
-    //delay(100);
-    Serial.println("Too fast!");
-  }
-
-  if ( micros()-start_time > Ts ) {
-    Serial.println("Sampling time too short");
-    delay(100);
-    exit(0);
-  }
-  while( micros()-start_time < Ts );  
+      delay(Ts/1000);
+    
 }

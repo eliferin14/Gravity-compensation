@@ -28,7 +28,7 @@ const int PWM_PIN = INA;
 // Control button
 #define BUTTON 4
 
-uint32_t Ts = 10000;
+uint32_t Ts = 10000;  // us
 uint32_t t_start = 0;
 
 // Overload of map() that accept float as input
@@ -108,10 +108,10 @@ void setup() {
   #ifdef AUTO_MODE
     // Sweep a set of dutycycle values
     // For each value, measure speed and current
-    for (float dutycycle = -0.5; dutycycle < 0.5; dutycycle+=0.02) {
+    Serial.print("[ ");
+    for (float dutycycle = 0.12; dutycycle < 0.30; dutycycle+=0.01) {
       setPWM(dutycycle);
       delay(1000);  // Skip the transient
-      Serial.print(dutycycle); Serial.print(", ");
 
       // Initialize speed
       float speed = 0;
@@ -119,11 +119,13 @@ void setup() {
 
       // Wait for the motor to be at a stable speed. When it is, press the button to print the data and go to the next value
       while(!digitalRead(BUTTON)) {
-        speed += 0.99 * ( encoder.getAngularSpeed(AS5600_MODE_RADIANS) - speed ); // Mean with forgetting factor
+        speed += 0.999 * ( encoder.getAngularSpeed(AS5600_MODE_RADIANS) - speed ); // Mean with forgetting factor
         delay(Ts/1000);
       }
-      Serial.print(speed); Serial.print("; ");
+      
+      Serial.print(dutycycle); Serial.print(", "); Serial.print(speed); Serial.println("; ");
     }
+    Serial.println("]");
   #endif
 
 }
