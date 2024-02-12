@@ -67,14 +67,14 @@ int pwm = 0;
 
 // PID gains
 // Ku = 5.5 Pu = 0.215
-float ku = 5.5;
-float Pu = 0.215;
+float ku = 10.0;
+float Pu = 0.220;
 float tau_i = Pu / 2;
 float tau_d = Pu / 8;
 
 float kp = 0.6 * ku;
-float ki = ku / tau_i;
-float kd = ku * tau_d;
+float ki = kp / tau_i;
+float kd = kp * tau_d;
 
 // Overload of map() that accept float as input
 long map(float x, float in_min, float in_max, long out_min, long out_max) {
