@@ -3,7 +3,7 @@ close all;
 clc;
 
 %% Load the data
-data = readtable("step_positive.csv")
+data = readtable("small_step_positive.csv")
 
 figure;
 hold on;

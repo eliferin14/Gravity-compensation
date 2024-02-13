@@ -64,7 +64,7 @@ float error_integral = 0;
 float previous_error = 0;
 float error_derivative = 0; float error_derivative_previous = 0;
 float theta_ref = 0;
-float step_amplitude = PI*3/4;
+float step_amplitude = -PI*1/2;
 float dutycycle = 0;
 int pwm = 0;
 
@@ -315,5 +315,5 @@ void loop() {
   }
   while( micros()-loop_start < Ts );  
 
-  //if (t > 3) { Serial.println("Experiment terminated"); setPWM(0); delay(500); exit(0); }
+  if (t > 5) { Serial.println("Experiment terminated"); setPWM(0); delay(500); exit(0); }
 }
