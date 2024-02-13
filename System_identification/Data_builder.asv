@@ -1,0 +1,12 @@
+t = data(:,1)
+u = data(:,2)
+y = data(:,3)
+
+close all;
+figure; hold on;
+plot(t,u);
+plot(t,y);
+grid on;
+legend("Input: dutycycle", "Output: angle")
+
+save('data.mat', 't', 'u', "y")
