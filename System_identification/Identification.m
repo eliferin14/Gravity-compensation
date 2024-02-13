@@ -23,7 +23,7 @@ figure; resid(m_arx, data_detrended, 'corr')
 figure; iopzplot(m_arx)
 
 %% Cross validation
-load data4.mat
+load data3.mat
 dataV = iddata(y,u,Ts);
 dataV_detrended = detrend(dataV, getTrend(dataV,0));
 
@@ -33,4 +33,7 @@ figure; compare(dataV_detrended, m_arx, k, opt)
 
 %% Save the model
 sysMotor = tf(m_arx)
+t = 0:Ts:9.99
+y = lsim(sysMotor,u,t)
+figure; hold on; plot(t,u); plot(t,y)
 save model.mat sysMotor

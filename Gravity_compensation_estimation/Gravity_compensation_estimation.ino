@@ -76,9 +76,9 @@ float Pu = 0.220;
 float tau_i = Pu / 2;
 float tau_d = Pu / 8;
 
-float kp = 0.6 * ku * 0.7;
-float ki = kp / tau_i;
-float kd = kp * tau_d * 1.2;
+float kp = 0.4; //0.6 * ku * 0.7;
+float ki = 0.66; //kp / tau_i;
+float kd = 0.03; //kp * tau_d * 1.2;
 
 // Overload of map() that accept float as input
 long map(float x, float in_min, float in_max, long out_min, long out_max) {

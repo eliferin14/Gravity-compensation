@@ -20,6 +20,7 @@ int PWM_PIN = INA;
 
 // Sampling time [us]
 uint32_t Ts = 5000;  
+uint32_t t_start = 0;
 
 // Encoder offset: the raw position when the bar is downward (our theta=0 position)
 // Use the "offset.ino" program to get this value in degrees
@@ -62,23 +63,24 @@ float error = 0;
 float error_integral = 0;
 float previous_error = 0;
 float error_derivative = 0; float error_derivative_previous = 0;
-float theta_ref = -PI*3/4;
+float theta_ref = 0;
+float step_amplitude = PI*3/4;
 float dutycycle = 0;
 int pwm = 0;
 
 // PID gains
 // Ku = 5.5 Pu = 0.215
-float ku = 10.0;
+float ku = 10;
 float Pu = 0.220;
 float tau_i = Pu / 2;
 float tau_d = Pu / 8;
 
-float kp = 0.6 * ku * 0.7;
+float kp = 0.6 * ku * 0.3;
 float ki = kp / tau_i;
-float kd = kp * tau_d * 1.2;
+float kd = kp * tau_d * 3;
 
 // Overload of map() that accept float as input
-long map(float x, float in_min, float in_max, long out_min, long out_max) {
+float map(float x, float in_min, float in_max, float out_min, float out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
@@ -236,13 +238,18 @@ void setup() {
 
   // Initialize error to avoid initial spike in the derivative
   error = readTheta() - theta_ref;
+
+  t_start = micros();
 }
 
 void loop() {
-  uint32_t start_time = micros();
+  uint32_t loop_start = micros();
+  float t = (loop_start - t_start) / 1000000.0; // Time past the start of the experiment, in seconds
 
   // Read the position of the bar
   theta = readTheta();
+
+  theta_ref = t<1 ? 0 : step_amplitude;
 
   // If the button is pressed, refresh the reference to be the current position
   if (digitalRead(BUTTON)) {
@@ -265,13 +272,13 @@ void loop() {
     }
 
     // If not saturating, increment the integral ("anti-windup")
-    if (abs(dutycycle) <= 0.99) error_integral += error * (Ts/1000000.0);
+    if (abs(dutycycle) <= 0.99 && abs(error) < 0.5) error_integral += error * (Ts/1000000.0);
 
     // Compute the discrete derivative of the error
     float error_delta = error - previous_error;
     if ( abs(error_delta) < PI ) error_derivative = (error_delta) / (Ts/1000000.0);
     // Low pass filter applied to derivative
-    error_derivative = lowPass(error_derivative, error_derivative_previous, 0.85);
+    error_derivative = lowPass(error_derivative, error_derivative_previous, 0.8);
     error_derivative_previous = error_derivative;
 
     // Compute the dutycycle
@@ -298,20 +305,15 @@ void loop() {
   // Print the data
   Serial.print("#"); 
   //Serial.print(motor_position_cumulative); Serial.print("\t"); Serial.print(motor_position); Serial.print("\t"); Serial.print(theta_cumulative); Serial.print("\t"); 
-  Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); Serial.print("\t"); Serial.print(kp* error, 3 ); Serial.print("\t"); Serial.print( ki* error_integral, 3 ); Serial.print("\t"); Serial.print(kd* error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 );  
+  Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); Serial.print("\t"); Serial.print(kp* error, 3 ); Serial.print("\t"); Serial.print( ki* error_integral, 3 ); Serial.print("\t"); Serial.print(kd* error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.print("\t"); Serial.print( t, 3 ); 
   Serial.println();
 
-  // Speed limit
-  if ( abs(error_derivative) > 50 ) {
-    setPWM(0);
-    //delay(100);
-    Serial.println("Too fast!");
-  }
-
-  if ( micros()-start_time > Ts ) {
+  if ( micros()-loop_start > Ts ) {
     Serial.println("Sampling time too short");
     delay(100);
     exit(0);
   }
-  while( micros()-start_time < Ts );  
+  while( micros()-loop_start < Ts );  
+
+  //if (t > 3) { Serial.println("Experiment terminated"); setPWM(0); delay(500); exit(0); }
 }
