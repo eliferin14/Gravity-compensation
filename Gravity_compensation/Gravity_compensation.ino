@@ -64,7 +64,7 @@ float error_integral = 0;
 float previous_error = 0;
 float error_derivative = 0; float error_derivative_previous = 0;
 float theta_ref = 0;
-float step_amplitude = -PI*1/2;
+float step_amplitude = PI*3/4;
 float dutycycle = 0;
 int pwm = 0;
 
