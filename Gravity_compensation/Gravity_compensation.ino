@@ -9,7 +9,7 @@ AS5600 encoder;
 float motor_position, motor_position_cumulative;
 float theta, theta_cumulative;
 
-// L298N
+// L298N driver
 #define INA 5
 #define INB 6
 #define EN 3
@@ -18,14 +18,9 @@ int PWM_PIN = INA;
 // Control button
 #define BUTTON 4
 
-// Sampling time [us]
-uint32_t Ts = 5000;  
-uint32_t t_start = 0;
-
-// Encoder offset: the raw position when the bar is downward (our theta=0 position)
-// Use the "offset.ino" program to get this value in degrees
-float offset_degrees = 143.53;
-float offset_radians = offset_degrees * 2*PI / 360;
+// Time variables [us]
+uint32_t Ts = 5000;   // sampling time
+uint32_t t_start = 0; // start time of the experiment
 
 // Power supply parameters
 #define V_PSU 11.7 // Before the driver [V]
@@ -40,7 +35,6 @@ const float V_MOT_MAX = V_PSU - DRIVER_DROP;
 
 // Gearbox parameters
 #define GEARBOX_RATIO 5.0 // The load spins 5 times slower than the motors
-#define GEARBOX_EFFICIENCY 1.0
 
 // Gravity compensation parameters
 #define m 0.0032     // mass [kg]
@@ -53,8 +47,7 @@ float gcomp_magic_number = 0.0047;
 
 // Given the angle compute the dutycycle that compensate the gravity torque
 float gravityCompensation(float theta) {
-  float x = sin(theta); //+ 0.2*cos(2*theta);
-  float V_gc = x * gcomp_magic_number * R/kphi; // Voltage [V]
+  float V_gc = sin(theta) * gcomp_magic_number * R/kphi; // Voltage [V]
   return V_gc / V_MOT_MAX;                        // dutycycle in range [0,1]
 }
 
@@ -62,24 +55,23 @@ float gravityCompensation(float theta) {
 float error = 0;
 float error_integral = 0;
 float previous_error = 0;
-float error_derivative = 0; float error_derivative_previous = 0;
+float error_derivative = 0; 
+float error_derivative_previous = 0;
 float theta_ref = 0;
 float step_amplitude = PI*3/4;
 float dutycycle = 0;
 int pwm = 0;
 
-// PID gains
-// Ku = 5.5 Pu = 0.215
+// Ziegler-Nichols ultimate gain and period
 float ku = 10;
 float Pu = 0.220;
-float tau_i = Pu / 2;
-float tau_d = Pu / 8;
 
-float kp = 0.2*ku;//0.6 * ku * 0.3;
-float ki = 0.4*ku/Pu;//kp / tau_i;
-float kd = 0.066*ku*Pu;//kp * tau_d * 3;
+// PID gains
+float kp = 0.2 * ku;
+float ki = 0.4 * ku / Pu;
+float kd = 0.066 * ku * Pu;
 
-// Overload of map() that accept float as input
+// Overload of map() that uses floats
 float map(float x, float in_min, float in_max, float out_min, float out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
@@ -96,46 +88,14 @@ int setPWM(float dutycycle) {
     exit(0);
   }
 
-  #ifdef FORWARD_BRAKE
-
-    #ifdef FB_SWITCH_PINS
-      digitalWrite(EN, 1);
-      // Set the correct direction
-      if ( dutycycle >= 0 ) {
-        PWM_PIN = INA;
-        digitalWrite(INB, 0);
-      }
-      else {
-        PWM_PIN = INB;
-        digitalWrite(INA, 0);
-      }
-    #endif
-
-    #ifndef FB_SWITCH_PINS
-      digitalWrite(EN, 1);
-      // Set the correct direction
-      if ( dutycycle >= 0 ) {
-        digitalWrite(INB, 0);
-      }
-      else {
-        digitalWrite(INB, 1);
-        dutycycle = 1+dutycycle;  // We are in forward brake!
-      }
-    #endif
-
-  #endif
-
-  #ifndef FORWARD_BRAKE
-    PWM_PIN = EN;
-    if (dutycycle >= 0) {
-      digitalWrite(INA, 1);
-      digitalWrite(INB, 0);
-    }
-    else {
-      digitalWrite(INA, 0);
-      digitalWrite(INB, 1);
-    }
-  #endif
+  // Set the correct direction
+  if ( dutycycle >= 0 ) {
+    digitalWrite(INB, 0);
+  }
+  else {
+    digitalWrite(INB, 1);
+    dutycycle = 1+dutycycle;  // We are in forward-brake!
+  }
 
   // Compute the int value of the pwm in the range [0,255]
   int pwm = map( abs(dutycycle), 0.0, 1.0, 0, 255);
@@ -147,7 +107,7 @@ int setPWM(float dutycycle) {
 // Return the angle in radians in a range [-pi,pi], where 0 is the downward position
 // We are measuring the motor's position, but we want to control the load => we need to take into account the gearbox
 float readTheta() {
-  // Measure the cumulative position of the motor, taking into account the offset
+  // Measure the cumulative position of the motor
   motor_position_cumulative = (encoder.getCumulativePosition() * AS5600_RAW_TO_RADIANS);
 
   // Cumulative position of the load
@@ -177,59 +137,47 @@ float lowPass(float x, float yPrev, float r) {
 
 // Given the error, compute the friction compensation term
 // If we use a simple sign(error) * friction_dutycycle, the input oscillates too much and the br oscillates a lot, so we need to smooth it
-// Linear seems to work well
-
-//#define THRESHOLD
-#define LINEAR
-//#define HYSTERESYS
 float friction_dutycycle = 0.21; // Voltage required to overcome static friction
 float error_threshold = 0.05;  // [rad]
 
 float frictionCompensation(float error) {
   float dutycycle = 0;
 
-  #ifdef THRESHOLD
-    if (abs(error) > error_threshold) {
-      dutycycle = sign(error) * friction_dutycycle;
-    }
-  #endif
-
-  #ifdef LINEAR
-    if ( abs(error) > error_threshold) {
-      dutycycle = sign(error) * friction_dutycycle;
-    }
-    else {
-      dutycycle = error / error_threshold * friction_dutycycle;
-    }
-  #endif
+  if ( abs(error) > error_threshold) {
+    dutycycle = sign(error) * friction_dutycycle;
+  }
+  else {
+    dutycycle = error / error_threshold * friction_dutycycle;
+  }
 
   return dutycycle;
 }
 
+//=========================================================================================================
 void setup() {
+  // Driver setup
   pinMode(INA, OUTPUT);
   pinMode(INB, OUTPUT);
   pinMode(EN, OUTPUT);
-
-  // Change this depending on the configuration
   digitalWrite(INB, 0);
   digitalWrite(INA, 0);
+  digitalWrite(EN, HIGH);
 
+  // Control button setup
   pinMode(BUTTON, INPUT);
 
-  // Increase the baudrate to speed things up
+  // Set the baudrate of the serial connection
   Serial.begin(250000);
   Serial.println("\n===================================\nProgram started");
 
-  // From the library example 
+  // Encoder setup
   Wire.begin();
   Wire.setClock(800000);
   encoder.begin(2);
   Serial.print("AS5600 connect: "); Serial.println(encoder.isConnected());
 
-  // Set the offset
-  encoder.setOffset(-offset_degrees);
-  encoder.resetCumulativePosition();
+    // Set the offset for the encoder. The rod should be oriented downward!
+    encoder.resetCumulativePosition();
 
   // Wait for the button to be pressed
   Serial.println("Press the button to start the experiment");
@@ -239,19 +187,20 @@ void setup() {
   // Initialize error to avoid initial spike in the derivative
   error = readTheta() - theta_ref;
 
+  // Starting time
   t_start = micros();
 }
 
 void loop() {
+  // Update time variables
   uint32_t loop_start = micros();
   float t = (loop_start - t_start) / 1000000.0; // Time past the start of the experiment, in seconds
 
   // Read the position of the bar
   theta = readTheta();
 
-  theta_ref = t<1 ? 0 : step_amplitude;
-
   // If the button is pressed, refresh the reference to be the current position
+  // This basically disables the controller
   if (digitalRead(BUTTON)) {
     theta_ref = theta;
     error_integral = 0;
@@ -271,7 +220,7 @@ void loop() {
       error += 2*PI;
     }
 
-    // If not saturating, increment the integral ("anti-windup")
+    // Integral with anti-windup
     if (abs(dutycycle) <= 0.99 && abs(error) < 0.5) error_integral += error * (Ts/1000000.0);
 
     // Compute the discrete derivative of the error
@@ -281,7 +230,7 @@ void loop() {
     error_derivative = lowPass(error_derivative, error_derivative_previous, 0.8);
     error_derivative_previous = error_derivative;
 
-    // Compute the dutycycle
+    // Compute the control dutycycle
     dutycycle = kp*error + ki*error_integral + kd*error_derivative;
 
   // Gravity compensation
@@ -296,24 +245,20 @@ void loop() {
   if (dutycycle > 1) dutycycle = 1;
   if (dutycycle < -1) dutycycle = -1;
 
-  // Change direction because we have the gearbox
+  // Change direction because we have the gearbox (positive dutycycle -> positive torque)
   dutycycle *= -1;
 
   // Set the pwm
   pwm = setPWM(dutycycle);
 
-  // Print the data
+  // Log the data
   Serial.print("#"); 
-  //Serial.print(motor_position_cumulative); Serial.print("\t"); Serial.print(motor_position); Serial.print("\t"); Serial.print(theta_cumulative); Serial.print("\t"); 
   Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); Serial.print("\t"); Serial.print(kp* error, 3 ); Serial.print("\t"); Serial.print( ki* error_integral, 3 ); Serial.print("\t"); Serial.print(kd* error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.print("\t"); Serial.print( t, 3 ); 
   Serial.println();
 
-  if ( micros()-loop_start > Ts ) {
-    Serial.println("Sampling time too short");
-    delay(100);
-    exit(0);
-  }
+  // Wait 
   while( micros()-loop_start < Ts );  
 
-  if (t > 5) { Serial.println("Experiment terminated"); setPWM(0); delay(500); exit(0); }
+  //theta_ref = t<1 ? 0 : step_amplitude;
+  //if (t > 5) { Serial.println("Experiment terminated"); setPWM(0); delay(500); exit(0); }
 }
