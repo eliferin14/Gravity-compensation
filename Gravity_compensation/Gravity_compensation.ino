@@ -36,18 +36,12 @@ const float V_MOT_MAX = V_PSU - DRIVER_DROP;
 // Gearbox parameters
 #define GEARBOX_RATIO 5.0 // The load spins 5 times slower than the motors
 
-// Gravity compensation parameters
-#define m 0.0032     // mass [kg]
-#define l 0.23    // length [m]
-#define g 9.81     // gravity acceleration [m/s^2]
-float linear_density = m / l;   // [kg/m]
-float d_gc = (l - 0.04) / 2 + 0.02; // distance of the center of mass of the part of the bar that produces torque [m]
-float m_gc = linear_density * (l - 0.04); // mass " [kg]
-float gcomp_magic_number = 0.0047;
+// Gravity compensation 
+float gravity_comp_constant = 0.0047;
 
 // Given the angle compute the dutycycle that compensate the gravity torque
 float gravityCompensation(float theta) {
-  float V_gc = sin(theta) * gcomp_magic_number * R/kphi; // Voltage [V]
+  float V_gc = sin(theta) * gravity_comp_constant * R/kphi; // Voltage [V]
   return V_gc / V_MOT_MAX;                        // dutycycle in range [0,1]
 }
 
@@ -58,7 +52,7 @@ float previous_error = 0;
 float error_derivative = 0; 
 float error_derivative_previous = 0;
 float theta_ref = 0;
-float step_amplitude = PI*3/4;
+float step_amplitude = PI*2/4;
 float dutycycle = 0;
 int pwm = 0;
 
@@ -77,9 +71,6 @@ float map(float x, float in_min, float in_max, float out_min, float out_max) {
 }
 
 // Take a float dutycycle in [-1,1], and "write" the correct configuration of the l298n driver
-// NB: Saturation sould be detected before calling this function!!!
-#define FORWARD_BRAKE
-//#define FB_SWITCH_PINS
 int setPWM(float dutycycle) {
   // Throw an error if saturation is detected. The saturation must be done outside!
   if (abs(dutycycle) > 1) {
@@ -211,17 +202,15 @@ void loop() {
     // Save the previous value of the error
     previous_error = error;
 
-    // Compute the new error
+    // Compute the error
     error = theta_ref - theta;
-    if (error > PI) {
-      error -= 2*PI;
-    }
-    else if (error < -PI) {
-      error += 2*PI;
-    }
+    if (error > PI) error -= 2*PI;
+    else if (error < -PI) error += 2*PI;
 
     // Integral with anti-windup
-    if (abs(dutycycle) <= 0.99 && abs(error) < 0.5) error_integral += error * (Ts/1000000.0);
+    if (abs(dutycycle) <= 0.99 && abs(error) < 0.5) {
+      error_integral += error * (Ts/1000000.0);
+    } 
 
     // Compute the discrete derivative of the error
     float error_delta = error - previous_error;
@@ -256,9 +245,9 @@ void loop() {
   Serial.print( theta, 3 ); Serial.print("\t"); Serial.print( theta_ref, 3 ); Serial.print("\t"); Serial.print(kp* error, 3 ); Serial.print("\t"); Serial.print( ki* error_integral, 3 ); Serial.print("\t"); Serial.print(kd* error_derivative, 3 ); Serial.print("\t"); Serial.print(dutycycle, 3); Serial.print("\t"); Serial.print("\t"); Serial.print( g_comp, 3 ); Serial.print("\t"); Serial.print( f_comp, 3 ); Serial.print("\t"); Serial.print( t, 3 ); 
   Serial.println();
 
-  // Wait 
+  // Wait the sampling time
   while( micros()-loop_start < Ts );  
 
-  //theta_ref = t<1 ? 0 : step_amplitude;
+  theta_ref = fmod(t,6) < 3 ? -step_amplitude : step_amplitude;
   //if (t > 5) { Serial.println("Experiment terminated"); setPWM(0); delay(500); exit(0); }
 }
